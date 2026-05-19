@@ -1,11 +1,36 @@
-# nv-lang/www.nv-lang.ru
+# nv-lang/www
 
-Зеркало [nv-lang/www](https://github.com/nv-lang/www) с CNAME для второго домена.
+Source for [nv-lang.org](https://nv-lang.org) — the Nova programming language website.
 
-Этот репозиторий обслуживает `https://nv-lang.ru/` через GitHub Pages. Содержимое **не редактируется здесь напрямую** — GitHub Action `.github/workflows/sync-from-www.yml` каждые 15 минут (а также по ручному запуску) тянет последнюю версию из `nv-lang/www` и пушит её сюда, подменяя `CNAME` на `nv-lang.ru`.
+## Stage
 
-Правки сайта делаются в `nv-lang/www`.
+Phase 0 (bootstrap): plain static HTML on GitHub Pages.
 
-## Ручной запуск синхронизации
+Future phases will replace this with a generator written in Nova itself, then
+with an HTTP server written in Nova (dogfooding initiative, see `nv-lang/nova`
+plan 60 when published).
 
-GitHub → Actions → **Sync from nv-lang/www** → Run workflow.
+## Structure
+
+```
+index.html       English entry
+ru/index.html    Russian translation
+style.css        Shared minimal style
+CNAME            Custom domain for GitHub Pages
+```
+
+No build step. Edit, commit, push — GitHub Pages serves it.
+
+## Local preview
+
+Open `index.html` in a browser, or run a simple server:
+
+```sh
+python3 -m http.server 8000
+# then visit http://localhost:8000/
+```
+
+## License
+
+Content licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+See [LICENSE](LICENSE).
