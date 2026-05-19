@@ -1,0 +1,63 @@
+name: Sync from nv-lang/www
+
+# Тянет содержимое публичного nv-lang/www и зеркалит в этот репо
+# с подменой CNAME на nv-lang.ru. Никаких PAT — используется встроенный
+# GITHUB_TOKEN, у которого права только на этот же репо.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # каждые 15 минут
+  workflow_dispatch:           # ручной запуск из вкладки Actions
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch latest from nv-lang/www
+        run: |
+          git clone --depth 1 https://github.com/nv-lang/www.git /tmp/upstream
+
+      - name: Replace tracked content with upstream
+        run: |
+          # Удаляем всё в корне репозитория кроме .git и .github,
+          # чтобы файлы, удалённые в upstream, исчезли и здесь.
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name '.git' \
+            ! -name '.github' \
+            -exec rm -rf {} +
+
+          # Копируем содержимое upstream, кроме .git и .github
+          rsync -av \
+            --exclude='.git' \
+            --exclude='.github' \
+            /tmp/upstream/ ./
+
+          # Подменяем CNAME, чтобы GitHub Pages обслуживал nv-lang.ru
+          echo "nv-lang.ru" > CNAME
+
+          rm -rf /tmp/upstream
+
+      - name: Commit & push
+        run: |
+          git config user.name  "nv-lang mirror bot"
+          git config user.email "bot@nv-lang.ru"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to mirror."
+            exit 0
+          fi
+          UPSTREAM_SHA=$(git -C /tmp/upstream rev-parse --short HEAD 2>/dev/null || echo unknown)
+          git commit -m "sync: mirror nv-lang/www@${UPSTREAM_SHA}"
+          git push
