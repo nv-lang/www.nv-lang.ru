@@ -10,18 +10,9 @@ name: Build & deploy nv-lang.ru mirror
 #
 # Реализует план www-05 (rev 2): nv-lang/www/plans/www-05-ru-mirror-seo.md
 #
-# ─── SETUP (один раз, manual) ────────────────────────────────────
-# 1. В Settings → Pages → Build and deployment → Source выбрать
-#    "GitHub Actions".
-# 2. Запустить этот workflow вручную через Actions → Run workflow.
-# 3. Проверить https://nv-lang.ru/ — отдаёт built HTML, не README.
-# 4. После успеха раскомментировать `schedule:` ниже отдельным
-#    коммитом (включить cron).
-# ─────────────────────────────────────────────────────────────────
-
 on:
-  # schedule:
-  #   - cron: '*/15 * * * *'   # каждые 15 минут — включить после Pages mode switch
+  schedule:
+    - cron: '*/15 * * * *'   # каждые 15 минут — auto-rebuild при изменениях в .org
   workflow_dispatch:
 
 permissions:
