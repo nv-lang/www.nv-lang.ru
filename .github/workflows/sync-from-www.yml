@@ -1,63 +1,125 @@
-name: Sync from nv-lang/www
+name: Build & deploy nv-lang.ru mirror
 
-# Тянет содержимое публичного nv-lang/www и зеркалит в этот репо
-# с подменой CNAME на nv-lang.ru. Никаких PAT — используется встроенный
-# GITHUB_TOKEN, у которого права только на этот же репо.
+# Зеркало nv-lang.ru: собирает Astro-сайт из апстрима nv-lang/www,
+# применяет .ru-специфичный post-process (CNAME, ru-RU hreflang,
+# sitemap URL), деплоит через GitHub Pages API.
+#
+# Главное изменение vs prior version: main .ru НЕ загрязняется
+# auto-commit'ами. Pages mode должен быть "GitHub Actions"
+# (см. SETUP ниже).
+#
+# Реализует план www-05 (rev 2): nv-lang/www/plans/www-05-ru-mirror-seo.md
+#
+# ─── SETUP (один раз, manual) ────────────────────────────────────
+# 1. В Settings → Pages → Build and deployment → Source выбрать
+#    "GitHub Actions".
+# 2. Запустить этот workflow вручную через Actions → Run workflow.
+# 3. Проверить https://nv-lang.ru/ — отдаёт built HTML, не README.
+# 4. После успеха раскомментировать `schedule:` ниже отдельным
+#    коммитом (включить cron).
+# ─────────────────────────────────────────────────────────────────
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'   # каждые 15 минут
-  workflow_dispatch:           # ручной запуск из вкладки Actions
+  # schedule:
+  #   - cron: '*/15 * * * *'   # каждые 15 минут — включить после Pages mode switch
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read    # не пушим в main — только читаем для checkout
+  pages: write      # для actions/deploy-pages
+  id-token: write   # для OIDC при deploy-pages
 
 concurrency:
-  group: sync
-  cancel-in-progress: false
+  group: deploy-mirror
+  cancel-in-progress: false   # let in-flight deploys finish
 
 jobs:
-  sync:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout this repo
+      - name: Checkout upstream nv-lang/www
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          repository: nv-lang/www
+          ref: main
+          path: upstream
 
-      - name: Fetch latest from nv-lang/www
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: upstream/site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: upstream/site
+        run: npm ci
+
+      - name: Build Astro site
+        working-directory: upstream/site
+        run: npm run build
+
+      - name: Post-process dist for .ru mirror
+        # 1. CNAME → nv-lang.ru (override .org CNAME)
+        # 2. Inject <link rel="alternate" hreflang="ru-RU" href="https://nv-lang.ru/{path}">
+        #    в каждый HTML с canonical, после x-default hreflang.
+        #    Skip: 404.html, страницы с noindex, страницы без canonical.
+        # 3. Sitemap.xml: replace nv-lang.org → nv-lang.ru для отдельной
+        #    submission в Google Search Console .ru property.
         run: |
-          git clone --depth 1 https://github.com/nv-lang/www.git /tmp/upstream
+          set -euo pipefail
+          DIST=upstream/site/dist
 
-      - name: Replace tracked content with upstream
-        run: |
-          # Удаляем всё в корне репозитория кроме .git и .github,
-          # чтобы файлы, удалённые в upstream, исчезли и здесь.
-          find . -mindepth 1 -maxdepth 1 \
-            ! -name '.git' \
-            ! -name '.github' \
-            -exec rm -rf {} +
+          # 1) CNAME
+          echo "nv-lang.ru" > "$DIST/CNAME"
 
-          # Копируем содержимое upstream, кроме .git и .github
-          rsync -av \
-            --exclude='.git' \
-            --exclude='.github' \
-            /tmp/upstream/ ./
+          # 2) Inject ru-RU hreflang
+          find "$DIST" -type f -name '*.html' \
+              -not -name '404.html' \
+              | while IFS= read -r f; do
+            # Skip если уже есть (идемпотентность)
+            if grep -q 'hreflang="ru-RU"' "$f"; then
+              continue
+            fi
+            # Skip noindex
+            if grep -qE 'name="robots"[^>]*content="[^"]*noindex' "$f"; then
+              continue
+            fi
+            # Извлечь canonical path
+            canonical=$(grep -oE '<link rel="canonical" href="https://nv-lang\.org[^"]*"' "$f" | head -1 || true)
+            if [ -z "$canonical" ]; then
+              continue
+            fi
+            path=$(echo "$canonical" | sed -E 's|<link rel="canonical" href="https://nv-lang\.org([^"]*)".*|\1|')
+            ru_url="https://nv-lang.ru${path}"
+            # Вставить после x-default
+            sed -i "s|<link rel=\"alternate\" hreflang=\"x-default\"[^>]*>|&<link rel=\"alternate\" hreflang=\"ru-RU\" href=\"${ru_url}\">|" "$f"
+          done
 
-          # Подменяем CNAME, чтобы GitHub Pages обслуживал nv-lang.ru
-          echo "nv-lang.ru" > CNAME
-
-          rm -rf /tmp/upstream
-
-      - name: Commit & push
-        run: |
-          git config user.name  "nv-lang mirror bot"
-          git config user.email "bot@nv-lang.ru"
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to mirror."
-            exit 0
+          # 3) Sitemap URL swap
+          if [ -f "$DIST/sitemap.xml" ]; then
+            sed -i 's|https://nv-lang\.org|https://nv-lang.ru|g' "$DIST/sitemap.xml"
           fi
-          UPSTREAM_SHA=$(git -C /tmp/upstream rev-parse --short HEAD 2>/dev/null || echo unknown)
-          git commit -m "sync: mirror nv-lang/www@${UPSTREAM_SHA}"
-          git push
+
+          # Sanity check
+          echo "::group::Built artifacts summary"
+          echo "HTML pages: $(find $DIST -name '*.html' | wc -l)"
+          echo "Pages with ru-RU hreflang: $(grep -lr 'hreflang="ru-RU"' $DIST 2>/dev/null | wc -l)"
+          echo "CNAME: $(cat $DIST/CNAME)"
+          echo "::endgroup::"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: upstream/site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

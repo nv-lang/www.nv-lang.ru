@@ -1,33 +1,45 @@
-# nv-lang/www
+# nv-lang/www.nv-lang.ru
 
-Source for [nv-lang.org](https://nv-lang.org) — the Nova programming language website.
+Зеркало [nv-lang/www](https://github.com/nv-lang/www) с CNAME для
+второго домена. Обслуживает `https://nv-lang.ru/` через GitHub Pages.
 
-Built with **[Astro](https://astro.build)** — a static site generator. The build
-produces plain HTML/CSS with zero JavaScript framework runtime; GitHub Actions
-deploys it to GitHub Pages.
+## Как это работает
 
-## Layout
+`.github/workflows/sync-from-www.yml` периодически (`*/15 *`) и по
+ручному запуску:
 
-```
-site/      the website — an Astro project
-plans/     development plans
-.github/   CI workflows
-```
+1. Клонирует upstream `nv-lang/www` (источник Astro).
+2. Собирает сайт (`npm ci` + `npm run build` в `site/`).
+3. Применяет .ru-специфичный post-process:
+   - **CNAME** → `nv-lang.ru` (override апстрим `.org` CNAME).
+   - **ru-RU hreflang** инжектируется в каждый HTML с canonical
+     (после x-default), указывает на саму себя на .ru.
+   - **sitemap.xml** — URL `nv-lang.org` → `nv-lang.ru` для отдельной
+     submission в Google Search Console .ru property.
+4. Деплоит через GitHub Pages API (actions/deploy-pages).
 
-## Develop
+**SEO-политика:** canonical остаётся → `.org` (consolidate SEO, нет
+duplicate-penalty). Дополнительный `ru-RU` hreflang даёт .ru
+SEO-присутствие для RU-locale queries в Yandex / Google.ru.
 
-From the `site/` directory:
+**Зачем зеркало, не редирект:** fallback на случай блокировки .org
+в РФ + нарратив «отечественный язык программирования».
 
-```sh
-npm install
-npm run dev        # http://localhost:4321
-npm run build      # → site/dist/
-npm run preview    # preview the built output
-```
+## Editing
 
-Requires Node 18.20.8+ / 20.3+ / 22+. See [CLAUDE.md](CLAUDE.md) for the full guide.
+**Контент сайта** редактируется только в [nv-lang/www](https://github.com/nv-lang/www).
+В этом репо — только workflow зеркала.
+
+## Ручной запуск deploy
+
+GitHub → Actions → **Build & deploy nv-lang.ru mirror** → Run workflow.
+
+## Pages configuration
+
+Settings → Pages → Build and deployment → Source = **GitHub Actions**.
+Если установлено «Deploy from branch» — workflow упадёт на deploy
+step (Pages API недоступен в branch mode).
 
 ## License
 
-Content licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-See [LICENSE](LICENSE).
+Same as upstream: содержимое сайта — CC BY 4.0; workflow — MIT.
